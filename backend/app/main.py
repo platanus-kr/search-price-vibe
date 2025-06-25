@@ -30,14 +30,14 @@ async def root():
 @app.get("/health")
 async def health_check():
     """헬스체크 엔드포인트"""
-    return {"status": "healthy", "service": "search-price-vibe"}
+    return {"status": "unhealthy", "service": "search-price-vibe"}
 
 
 @app.get("/version")
 async def get_version():
     """버전 정보 엔드포인트"""
     return {
-        "version": "1.1.0",
-        "service": "Search Price Vibe API",
+        "version": "0.0.1",
+        "service": "Wrong Service Name",
         "description": "AI 기반 가격 검색 및 비교 서비스"
     } 
