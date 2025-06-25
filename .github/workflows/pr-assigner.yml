@@ -1,0 +1,126 @@
+name: PR Auto Assigner
+
+on:
+  pull_request:
+    types: [opened, reopened]
+
+jobs:
+  assign-reviewers:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
+
+    steps:
+    - name: Auto Assign Reviewers
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const { owner, repo, number } = context.pullRequest;
+          const author = context.payload.pull_request.user.login;
+          
+          // 팀 멤버 리스트 (실제 프로젝트에 맞게 수정하세요)
+          const teamMembers = [
+            'team-lead',
+            'senior-dev',
+            'backend-expert',
+            'frontend-expert'
+          ];
+          
+          // PR 작성자를 제외한 리뷰어 후보
+          const reviewerCandidates = teamMembers.filter(member => member !== author);
+          
+          // PR 변경 파일 경로에 따른 전문가 할당
+          const { data: files } = await github.rest.pulls.listFiles({
+            owner,
+            repo,
+            pull_number: number
+          });
+          
+          let assignees = [];
+          let reviewers = [];
+          
+          // 파일 경로 기반 전문가 할당
+          const hasBackendChanges = files.some(file => file.filename.startsWith('backend/'));
+          const hasFrontendChanges = files.some(file => file.filename.startsWith('frontend/'));
+          const hasTestChanges = files.some(file => file.filename.includes('test'));
+          
+          if (hasBackendChanges && reviewerCandidates.includes('backend-expert')) {
+            reviewers.push('backend-expert');
+          }
+          
+          if (hasFrontendChanges && reviewerCandidates.includes('frontend-expert')) {
+            reviewers.push('frontend-expert');
+          }
+          
+          // 기본 리뷰어 할당 (팀 리드)
+          if (reviewerCandidates.includes('team-lead') && !reviewers.includes('team-lead')) {
+            reviewers.push('team-lead');
+          }
+          
+          // 추가 리뷰어가 필요한 경우 랜덤 선택
+          if (reviewers.length < 2) {
+            const additionalReviewers = reviewerCandidates
+              .filter(member => !reviewers.includes(member))
+              .sort(() => 0.5 - Math.random())
+              .slice(0, 2 - reviewers.length);
+            
+            reviewers.push(...additionalReviewers);
+          }
+          
+          // PR 작성자를 assignee로 할당
+          assignees.push(author);
+          
+          try {
+            // 리뷰어 할당
+            if (reviewers.length > 0) {
+              await github.rest.pulls.requestReviewers({
+                owner,
+                repo,
+                pull_number: number,
+                reviewers: reviewers
+              });
+              
+              console.log(`리뷰어 할당됨: ${reviewers.join(', ')}`);
+            }
+            
+            // Assignee 할당
+            if (assignees.length > 0) {
+              await github.rest.issues.addAssignees({
+                owner,
+                repo,
+                issue_number: number,
+                assignees: assignees
+              });
+              
+              console.log(`Assignee 할당됨: ${assignees.join(', ')}`);
+            }
+            
+            // 할당 결과 댓글 추가
+            const comment = `🤖 **자동 할당 완료**
+            
+            **👨‍💼 Assignee:** ${assignees.join(', ')}
+            **👥 Reviewers:** ${reviewers.join(', ')}
+            
+            ${hasBackendChanges ? '🔧 백엔드 변경사항 감지됨' : ''}
+            ${hasFrontendChanges ? '🎨 프론트엔드 변경사항 감지됨' : ''}
+            ${hasTestChanges ? '🧪 테스트 코드 변경사항 감지됨' : ''}`;
+            
+            await github.rest.issues.createComment({
+              owner,
+              repo,
+              issue_number: number,
+              body: comment
+            });
+            
+          } catch (error) {
+            console.error('할당 중 오류 발생:', error);
+            
+            // 오류 발생 시 댓글로 알림
+            await github.rest.issues.createComment({
+              owner,
+              repo,
+              issue_number: number,
+              body: `⚠️ 자동 할당 중 오류가 발생했습니다. 수동으로 리뷰어를 할당해 주세요.\n\n오류: ${error.message}`
+            });
+          } 

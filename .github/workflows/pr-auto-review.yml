@@ -1,0 +1,167 @@
+name: PR Auto Review
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  auto-review:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Auto Code Review
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const { owner, repo, number } = context.pullRequest;
+          
+          // PR 파일 변경사항 가져오기
+          const { data: files } = await github.rest.pulls.listFiles({
+            owner,
+            repo,
+            pull_number: number
+          });
+          
+          let reviewComments = [];
+          let generalComments = [];
+          
+          // 코드 품질 체크
+          for (const file of files) {
+            const filename = file.filename;
+            const patch = file.patch || '';
+            
+            // Python 파일 체크
+            if (filename.endsWith('.py')) {
+              // 긴 라인 체크
+              const lines = patch.split('\n');
+              lines.forEach((line, index) => {
+                if (line.startsWith('+') && line.length > 120) {
+                  reviewComments.push({
+                    path: filename,
+                    line: index + 1,
+                    body: '⚠️ 이 라인이 120자를 초과합니다. 가독성을 위해 줄바꿈을 고려해보세요.'
+                  });
+                }
+                
+                // TODO, FIXME 등 체크
+                if (line.includes('TODO') || line.includes('FIXME') || line.includes('HACK')) {
+                  reviewComments.push({
+                    path: filename,
+                    line: index + 1,
+                    body: '📝 TODO/FIXME가 발견되었습니다. 이슈를 생성하여 추적하는 것을 고려해보세요.'
+                  });
+                }
+                
+                // print 문 체크 (디버깅 코드일 가능성)
+                if (line.includes('print(') && !filename.includes('test')) {
+                  reviewComments.push({
+                    path: filename,
+                    line: index + 1,
+                    body: '🐛 print문이 발견되었습니다. 로깅 라이브러리 사용을 고려해보세요.'
+                  });
+                }
+              });
+              
+              // 테스트 파일 체크
+              if (filename.includes('test') && file.additions > 0) {
+                generalComments.push('✅ 테스트 코드가 추가되었습니다. 좋습니다!');
+              }
+            }
+            
+            // 설정 파일 변경 체크
+            if (filename === 'requirements.txt' || filename.includes('requirements')) {
+              generalComments.push('📦 의존성이 변경되었습니다. 새로운 패키지가 필요한 이유를 설명해주세요.');
+            }
+            
+            // 큰 파일 변경 체크
+            if (file.changes > 200) {
+              generalComments.push(`📄 ${filename} 파일에 많은 변경사항(${file.changes}줄)이 있습니다. 더 작은 단위로 나누는 것을 고려해보세요.`);
+            }
+          }
+          
+          // 전체 변경사항 분석
+          const totalChanges = files.reduce((sum, file) => sum + file.changes, 0);
+          const addedLines = files.reduce((sum, file) => sum + file.additions, 0);
+          const deletedLines = files.reduce((sum, file) => sum + file.deletions, 0);
+          
+          // 큰 PR 경고
+          if (totalChanges > 500) {
+            generalComments.push('🚨 이 PR은 매우 큽니다 (500줄 이상). 리뷰어의 부담을 줄이기 위해 더 작은 단위로 나누는 것을 고려해보세요.');
+          }
+          
+          // 삭제만 있는 경우
+          if (addedLines === 0 && deletedLines > 0) {
+            generalComments.push('🧹 코드 정리 작업이군요! 삭제된 코드가 다른 곳에서 사용되지 않는지 확인했는지 알려주세요.');
+          }
+          
+          // 리뷰 생성
+          let reviewBody = '🤖 **자동 코드 리뷰**\n\n';
+          
+          // 통계 정보
+          reviewBody += `**📊 변경 통계:**\n`;
+          reviewBody += `- 변경된 파일: ${files.length}개\n`;
+          reviewBody += `- 추가된 줄: ${addedLines}줄\n`;
+          reviewBody += `- 삭제된 줄: ${deletedLines}줄\n`;
+          reviewBody += `- 총 변경량: ${totalChanges}줄\n\n`;
+          
+          // 일반 코멘트
+          if (generalComments.length > 0) {
+            reviewBody += '**💡 일반 제안사항:**\n';
+            generalComments.forEach(comment => {
+              reviewBody += `- ${comment}\n`;
+            });
+            reviewBody += '\n';
+          }
+          
+          // 체크리스트
+          reviewBody += '**✅ 코드 리뷰 체크리스트:**\n';
+          reviewBody += '- [ ] 코드가 읽기 쉽고 이해하기 쉬운가?\n';
+          reviewBody += '- [ ] 변수명과 함수명이 명확한가?\n';
+          reviewBody += '- [ ] 에러 처리가 적절히 되어 있는가?\n';
+          reviewBody += '- [ ] 테스트 코드가 충분한가?\n';
+          reviewBody += '- [ ] 성능상 문제는 없는가?\n';
+          reviewBody += '- [ ] 보안상 취약점은 없는가?\n';
+          reviewBody += '- [ ] 문서화가 필요한 부분은 없는가?\n\n';
+          
+          reviewBody += '이 리뷰는 자동으로 생성되었습니다. 추가적인 리뷰는 팀 멤버가 진행할 예정입니다. 👥';
+          
+          try {
+            // 일반 댓글로 리뷰 결과 게시
+            await github.rest.issues.createComment({
+              owner,
+              repo,
+              issue_number: number,
+              body: reviewBody
+            });
+            
+            // 라인 단위 코멘트가 있다면 리뷰로 등록
+            if (reviewComments.length > 0) {
+              const { data: pr } = await github.rest.pulls.get({
+                owner,
+                repo,
+                pull_number: number
+              });
+              
+              await github.rest.pulls.createReview({
+                owner,
+                repo,
+                pull_number: number,
+                commit_id: pr.head.sha,
+                body: '🤖 자동 코드 리뷰에서 발견된 개선사항들입니다.',
+                event: 'COMMENT',
+                comments: reviewComments.slice(0, 10) // 최대 10개 코멘트만
+              });
+            }
+            
+            console.log('자동 리뷰 완료');
+            
+          } catch (error) {
+            console.error('자동 리뷰 생성 중 오류:', error);
+          } 

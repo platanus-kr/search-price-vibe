@@ -1,0 +1,126 @@
+name: Issue Auto Comment
+
+on:
+  issues:
+    types: [opened, reopened]
+
+jobs:
+  issue-comment:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      contents: read
+
+    steps:
+    - name: Add Issue Comment
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const { owner, repo, number } = context.issue;
+          const issue = context.payload.issue;
+          
+          // 이슈 제목과 내용 분석
+          const title = issue.title.toLowerCase();
+          const body = (issue.body || '').toLowerCase();
+          const fullText = title + ' ' + body;
+          
+          let comment = '👋 이슈를 제출해 주셔서 감사합니다!\n\n';
+          
+          // 이슈 타입별 맞춤 코멘트
+          if (title.includes('[bug]') || title.includes('bug') || fullText.includes('error') || fullText.includes('문제')) {
+            comment += `🐛 **버그 리포트**를 접수했습니다.
+            
+            **다음 단계:**
+            1. 개발팀이 버그를 재현해보겠습니다
+            2. 우선순위를 설정하고 담당자를 배정합니다
+            3. 수정 일정을 알려드리겠습니다
+            
+            **추가 도움이 필요한 정보:**
+            - 스크린샷이나 에러 로그
+            - 재현 가능한 단계별 설명
+            - 사용 환경 정보 (OS, 브라우저 등)`;
+            
+          } else if (title.includes('[feature]') || title.includes('feature') || fullText.includes('기능') || fullText.includes('추가')) {
+            comment += `🚀 **새 기능 요청**을 접수했습니다.
+            
+            **검토 과정:**
+            1. 제품 팀에서 요구사항을 분석합니다
+            2. 기술적 검토를 진행합니다
+            3. 개발 우선순위를 결정합니다
+            4. 개발 일정을 수립하고 알려드립니다
+            
+            **도움이 되는 추가 정보:**
+            - 이 기능이 해결하고자 하는 구체적인 문제
+            - 예상되는 사용자 시나리오
+            - 유사한 기능의 참고 사례`;
+            
+          } else if (title.includes('[question]') || title.includes('question') || fullText.includes('질문') || fullText.includes('어떻게')) {
+            comment += `❓ **질문**을 접수했습니다.
+            
+            **답변 과정:**
+            1. 관련 분야 전문가가 검토합니다
+            2. 24-48시간 내에 답변드리겠습니다
+            3. 필요시 추가 설명이나 예시를 제공합니다
+            
+            **더 빠른 답변을 위한 팁:**
+            - 구체적인 사용 사례나 예시 제공
+            - 현재 시도해본 방법들 공유
+            - 관련 코드나 설정 정보 첨부`;
+            
+          } else if (title.includes('[docs]') || title.includes('documentation') || fullText.includes('문서')) {
+            comment += `📚 **문서 관련 이슈**를 접수했습니다.
+            
+            **처리 과정:**
+            1. 문서팀에서 검토합니다
+            2. 개선사항을 반영합니다
+            3. 업데이트된 문서를 배포합니다
+            
+            **문서 개선에 도움이 되는 정보:**
+            - 어떤 부분이 불분명한지 구체적 설명
+            - 기대했던 내용과 실제 내용의 차이
+            - 제안하는 개선 방향`;
+            
+          } else {
+            comment += `**이슈 분류:**
+            - 🐛 **버그**: 오류나 예상과 다른 동작
+            - 🚀 **기능 요청**: 새로운 기능이나 개선사항
+            - ❓ **질문**: 사용법이나 기술적 질문
+            - 📚 **문서**: 문서 개선이나 추가 요청
+            
+            적절한 라벨을 추가하면 더 빠른 처리가 가능합니다!`;
+          }
+          
+          comment += `
+          
+          ## 📋 진행 상황 추적
+          
+          이 이슈의 진행 상황은 다음과 같이 업데이트됩니다:
+          - **접수됨**: 이슈가 등록되어 대기 중입니다
+          - **검토 중**: 팀에서 이슈를 분석하고 있습니다
+          - **진행 중**: 작업이 시작되었습니다
+          - **해결됨**: 문제가 해결되었습니다
+          - **완료**: 모든 작업이 완료되었습니다
+          
+          ## 🏷️ 라벨 안내
+          
+          자동으로 적절한 라벨이 추가될 예정입니다:
+          - **우선순위**: \`priority/low\`, \`priority/medium\`, \`priority/high\`, \`priority/critical\`
+          - **타입**: \`type/bug\`, \`type/feature\`, \`type/question\`, \`type/docs\`
+          - **영역**: \`area/backend\`, \`area/frontend\`, \`area/api\`, \`area/ui\`
+          - **상태**: \`status/open\`, \`status/in-progress\`, \`status/blocked\`
+          
+          추가 질문이나 정보가 필요하시면 언제든 댓글로 알려주세요! 🙂`;
+          
+          try {
+            await github.rest.issues.createComment({
+              owner,
+              repo,
+              issue_number: number,
+              body: comment
+            });
+            
+            console.log(`이슈 #${number}에 자동 댓글 추가됨`);
+            
+          } catch (error) {
+            console.error('이슈 댓글 추가 중 오류:', error);
+          } 

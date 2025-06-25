@@ -1,0 +1,158 @@
+name: PR Auto Labeler
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  label-pr:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
+
+    steps:
+    - name: Auto Label PR
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const { owner, repo, number } = context.pullRequest;
+          const pr = context.payload.pull_request;
+          
+          // PR 파일 변경사항 가져오기
+          const { data: files } = await github.rest.pulls.listFiles({
+            owner,
+            repo,
+            pull_number: number
+          });
+          
+          let labels = [];
+          
+          // 파일 경로 기반 라벨 할당
+          const hasBackendChanges = files.some(file => file.filename.startsWith('backend/'));
+          const hasFrontendChanges = files.some(file => file.filename.startsWith('frontend/'));
+          const hasTestChanges = files.some(file => file.filename.includes('test'));
+          const hasDocsChanges = files.some(file => 
+            file.filename.startsWith('docs/') || 
+            file.filename.endsWith('.md') ||
+            file.filename.endsWith('.rst')
+          );
+          const hasConfigChanges = files.some(file => 
+            file.filename.includes('requirements.txt') ||
+            file.filename.includes('.yml') ||
+            file.filename.includes('.yaml') ||
+            file.filename.endsWith('.json') ||
+            file.filename.includes('Dockerfile')
+          );
+          
+          // 영역별 라벨
+          if (hasBackendChanges) labels.push('area/backend');
+          if (hasFrontendChanges) labels.push('area/frontend');
+          if (hasTestChanges) labels.push('area/testing');
+          if (hasDocsChanges) labels.push('area/documentation');
+          if (hasConfigChanges) labels.push('area/configuration');
+          
+          // PR 제목 기반 타입 라벨
+          const title = pr.title.toLowerCase();
+          
+          if (title.includes('[feat]') || title.includes('feat:') || title.includes('feature')) {
+            labels.push('type/feature');
+          } else if (title.includes('[fix]') || title.includes('fix:') || title.includes('bug')) {
+            labels.push('type/bug');
+          } else if (title.includes('[docs]') || title.includes('docs:') || title.includes('documentation')) {
+            labels.push('type/documentation');
+          } else if (title.includes('[refactor]') || title.includes('refactor:')) {
+            labels.push('type/refactoring');
+          } else if (title.includes('[test]') || title.includes('test:')) {
+            labels.push('type/testing');
+          } else if (title.includes('[chore]') || title.includes('chore:')) {
+            labels.push('type/maintenance');
+          } else if (title.includes('[style]') || title.includes('style:')) {
+            labels.push('type/style');
+          }
+          
+          // PR 변경 라인 수 기반 크기 라벨
+          let totalChanges = 0;
+          files.forEach(file => {
+            totalChanges += file.additions + file.deletions;
+          });
+          
+          if (totalChanges < 10) {
+            labels.push('size/XS');
+          } else if (totalChanges < 30) {
+            labels.push('size/S');
+          } else if (totalChanges < 100) {
+            labels.push('size/M');
+          } else if (totalChanges < 500) {
+            labels.push('size/L');
+          } else {
+            labels.push('size/XL');
+          }
+          
+          // 우선순위 라벨 (제목이나 설명에서 키워드 검색)
+          const description = (pr.body || '').toLowerCase();
+          const fullText = (title + ' ' + description).toLowerCase();
+          
+          if (fullText.includes('urgent') || fullText.includes('hotfix') || fullText.includes('critical')) {
+            labels.push('priority/high');
+          } else if (fullText.includes('breaking') || fullText.includes('breaking change')) {
+            labels.push('priority/high');
+            labels.push('breaking-change');
+          }
+          
+          // 드래프트 PR인 경우
+          if (pr.draft) {
+            labels.push('status/draft');
+          } else {
+            labels.push('status/ready-for-review');
+          }
+          
+          // 중복 제거
+          labels = [...new Set(labels)];
+          
+          try {
+            // 라벨 적용
+            if (labels.length > 0) {
+              await github.rest.issues.addLabels({
+                owner,
+                repo,
+                issue_number: number,
+                labels: labels
+              });
+              
+              console.log(`라벨 적용됨: ${labels.join(', ')}`);
+              
+              // 라벨 적용 결과 댓글
+              const comment = `🏷️ **자동 라벨링 완료**
+              
+              적용된 라벨: ${labels.map(label => `\`${label}\``).join(', ')}
+              
+              **📊 변경 통계:**
+              - 총 변경 라인 수: ${totalChanges}
+              - 변경된 파일 수: ${files.length}
+              
+              **🔍 감지된 영역:**
+              ${hasBackendChanges ? '- 🔧 백엔드' : ''}
+              ${hasFrontendChanges ? '- 🎨 프론트엔드' : ''}
+              ${hasTestChanges ? '- 🧪 테스트' : ''}
+              ${hasDocsChanges ? '- 📚 문서' : ''}
+              ${hasConfigChanges ? '- ⚙️ 설정' : ''}`;
+              
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: number,
+                body: comment
+              });
+            }
+            
+          } catch (error) {
+            console.error('라벨링 중 오류 발생:', error);
+            
+            await github.rest.issues.createComment({
+              owner,
+              repo,
+              issue_number: number,
+              body: `⚠️ 자동 라벨링 중 오류가 발생했습니다.\n\n오류: ${error.message}`
+            });
+          } 

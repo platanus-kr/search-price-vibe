@@ -1,0 +1,71 @@
+name: Run Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [3.11]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+
+    - name: Install backend dependencies
+      run: |
+        cd backend
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Install frontend dependencies
+      run: |
+        cd frontend
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Run backend tests
+      run: |
+        cd backend
+        python -m pytest tests/ -v --tb=short
+
+    - name: Run frontend tests (if exists)
+      run: |
+        cd frontend
+        if [ -d "tests" ]; then
+          python -m pytest tests/ -v --tb=short
+        else
+          echo "Frontend tests directory not found, skipping..."
+        fi
+
+    - name: Generate test coverage report
+      run: |
+        cd backend
+        pip install coverage
+        coverage run -m pytest tests/
+        coverage xml
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./backend/coverage.xml
+        flags: backend
+        name: codecov-umbrella
+        fail_ci_if_error: false 
