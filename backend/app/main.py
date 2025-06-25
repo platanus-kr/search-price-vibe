@@ -3,9 +3,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.routers import chat
 
 app = FastAPI(
-    title="Chat API",
-    description="간단한 채팅 API 서버",
-    version="1.0.0"
+    title="Search Price Vibe API",
+    description="AI 기반 가격 검색 및 비교 서비스 API",
+    version="1.1.0"
 )
 
 # CORS 설정
@@ -24,10 +24,20 @@ app.include_router(chat.router)
 @app.get("/")
 async def root():
     """루트 엔드포인트"""
-    return {"message": "Chat API Server"}
+    return {"message": "Search Price Vibe API Server - 스마트 쇼핑 도우미"}
 
 
 @app.get("/health")
 async def health_check():
     """헬스체크 엔드포인트"""
-    return {"status": "healthy"} 
+    return {"status": "healthy", "service": "search-price-vibe"}
+
+
+@app.get("/version")
+async def get_version():
+    """버전 정보 엔드포인트"""
+    return {
+        "version": "1.1.0",
+        "service": "Search Price Vibe API",
+        "description": "AI 기반 가격 검색 및 비교 서비스"
+    } 
